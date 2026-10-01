@@ -62,41 +62,87 @@ issue (the game is not a protected binary).
 ## Requirements
 
 * macOS (Intel or Apple Silicon).
-* Xcode or the Xcode Command Line Tools (`clang`).
 * Civilization V installed through Steam.
+* Only for building from source: Xcode or the Xcode Command Line Tools (`clang`).
+
+---
 
 ## Install
 
-1. Clone the repo:
+### Option 1 — automatic (recommended)
 
-   ```sh
-   git clone https://github.com/mitrii/Civ5Display.git
-   cd Civ5Display
-   ```
-
-2. Run the installer. It auto-detects the usual Steam location:
-
-   ```sh
-   ./install.sh
-   ```
-
-   If your library is elsewhere (external drive, custom path), point it at the
-   bundle:
-
-   ```sh
-   CIV5_APP="/Volumes/Games/SteamLibrary/steamapps/common/Sid Meier's Civilization V/Civilization V.app" ./install.sh
-   ```
-
-3. Launch Civilization V from Steam. It should open on the external monitor and
-   stay there when you drag it or open the laptop lid.
-
-Prefer a prebuilt binary? Download `libcivdisplay.dylib` from the
-[latest release](https://github.com/mitrii/Civ5Display/releases/latest) and pass
-it to the installer:
+`install.sh` downloads the prebuilt `libcivdisplay.dylib` from the latest
+release, installs the wrapper and re-signs the app:
 
 ```sh
-CIV5_DYLIB=./libcivdisplay.dylib ./install.sh
+curl -fsSL https://raw.githubusercontent.com/mitrii/Civ5Display/main/install.sh -o install.sh
+bash install.sh
 ```
+
+If your game is not in the default Steam location:
+
+```sh
+CIV5_APP="/Volumes/Games/SteamLibrary/steamapps/common/Sid Meier's Civilization V/Civilization V.app" bash install.sh
+```
+
+Other options:
+
+```sh
+bash install.sh --version v1.0.0            # a specific release
+bash install.sh --dylib ./libcivdisplay.dylib   # a dylib you already have
+bash install.sh --build                     # compile from source (needs src/)
+```
+
+Or clone the repo and run it from there (`./install.sh`).
+
+### Option 2 — manual
+
+Do it yourself with the prebuilt binary from the release.
+
+**1. Download the dylib**
+
+```sh
+mkdir -p "$HOME/Library/Application Support/Civ5Display"
+curl -fL -o "$HOME/Library/Application Support/Civ5Display/libcivdisplay.dylib" \
+  https://github.com/mitrii/Civ5Display/releases/latest/download/libcivdisplay.dylib
+```
+
+**2. Back up the real game executable**
+
+```sh
+APP="/path/to/Sid Meier's Civilization V/Civilization V.app"
+cp -p "$APP/Contents/MacOS/Civilization V" "$APP/Contents/MacOS/Civilization V.bin"
+```
+
+**3. Replace the executable with the wrapper**
+
+```sh
+cat > "$APP/Contents/MacOS/Civilization V" <<'EOF'
+#!/bin/bash
+# Inject the display interposer, preserving any Steam overlay libs already set.
+: "${CIV5_DISPLAY:=external}"
+export CIV5_DISPLAY
+EXTRA="$HOME/Library/Application Support/Civ5Display/libcivdisplay.dylib"
+if [ -n "$DYLD_INSERT_LIBRARIES" ]; then
+  export DYLD_INSERT_LIBRARIES="$EXTRA:$DYLD_INSERT_LIBRARIES"
+else
+  export DYLD_INSERT_LIBRARIES="$EXTRA"
+fi
+exec "$(dirname "$0")/Civilization V.bin" "$@"
+EOF
+chmod +x "$APP/Contents/MacOS/Civilization V"
+```
+
+**4. Re-sign the app (ad-hoc)**
+
+```sh
+codesign --force --deep --sign - "$APP"
+```
+
+**5. Launch Civilization V from Steam.** It should open on the external monitor
+and stay there when you drag it or open the laptop lid.
+
+---
 
 ## Choosing the monitor
 
@@ -125,7 +171,7 @@ system_profiler SPDisplaysDataType | grep -E "Display Type|Resolution|^        [
 ## Caveats
 
 * **Steam → Verify integrity of game files** restores the original executable and
-  removes the wrapper. Just run `./install.sh` again.
+  removes the wrapper. Just re-run `install.sh`.
 * The installer re-signs the app **ad-hoc**, replacing Aspyr's Developer ID
   signature. This is required to run a modified bundle and is fine locally.
 * The interposer answers for a chosen display; the menu bar is untouched.
@@ -143,12 +189,37 @@ codesign --force --deep --sign - "$APP"
 
 (or just use Steam → Verify integrity of game files).
 
-## Build
+---
+
+## Build from source
+
+Only needed if you want to compile the dylib yourself instead of using the
+prebuilt one.
+
+**Quick way** (from a clone of this repo):
 
 ```sh
 make          # -> libcivdisplay.dylib (universal x86_64 + arm64)
 make test     # builds a helper and prints how the interposer sees each display
 ```
+
+**Manual way:**
+
+```sh
+git clone https://github.com/mitrii/Civ5Display.git
+cd Civ5Display
+xcrun --sdk macosx clang -dynamiclib -O2 -o libcivdisplay.dylib src/civdisplay.c \
+  -framework ApplicationServices -framework IOKit -framework CoreFoundation \
+  -arch x86_64 -arch arm64
+```
+
+Then either install it with the installer:
+
+```sh
+CIV5_DYLIB=./libcivdisplay.dylib ./install.sh
+```
+
+or use it in the manual install steps above.
 
 The [GitHub Actions workflow](.github/workflows/build.yml) builds the dylib on
 every push and attaches it to a release when you push a `v*` tag.
@@ -159,7 +230,7 @@ every push and attaches it to a release when you push a `v*` tag.
 src/civdisplay.c   the interposer (compiled to libcivdisplay.dylib)
 src/wrapper.sh     the wrapper installed as Contents/MacOS/Civilization V
 src/disptest.c     diagnostic helper (make test)
-install.sh         build + install + re-sign
+install.sh         download/build + install + re-sign
 Makefile           local build
 .github/workflows/build.yml   CI
 ```
