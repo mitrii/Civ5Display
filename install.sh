@@ -4,38 +4,56 @@
 #
 # By default it DOWNLOADS the prebuilt libcivdisplay.dylib from GitHub Releases,
 # installs a small wrapper as the game executable, and re-signs the app ad-hoc.
-#
-# Usage:
-#   ./install.sh                                   download latest prebuilt dylib
-#   CIV5_APP="/path/to/Civilization V.app" ./install.sh
-#   ./install.sh --dylib ./libcivdisplay.dylib     use a local dylib
-#   ./install.sh --version v1.0.0                  a specific release
-#   ./install.sh --build                           build from source (needs src/)
-#
-# Environment:
-#   CIV5_APP       path to "Civilization V.app"
-#   CIV5_DYLIB     path to a local libcivdisplay.dylib
-#   CIV5_VERSION   release tag to download (default: latest)
-#
 set -euo pipefail
 
 REPO="mitrii/Civ5Display"
 ASSET="libcivdisplay.dylib"
 INSTALL_DIR="$HOME/Library/Application Support/Civ5Display"
 DYLIB="$INSTALL_DIR/libcivdisplay.dylib"
+CONFIG="$INSTALL_DIR/config"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
 
 BUILD=0
 LOCAL_DYLIB="${CIV5_DYLIB:-}"
 VERSION="${CIV5_VERSION:-latest}"
 
+usage() {
+  cat <<'USAGE'
+install.sh - install the Civ5Display interposer for Civilization V on macOS.
+
+Usage:
+  ./install.sh                                   download latest prebuilt dylib
+  CIV5_APP="/path/to/Civilization V.app" ./install.sh
+  ./install.sh --dylib ./libcivdisplay.dylib     use a local dylib
+  ./install.sh --version v1.0.0                  a specific release
+  ./install.sh --build                           build from source (needs src/)
+  ./install.sh --list                            list display names and exit
+
+Environment:
+  CIV5_APP       path to "Civilization V.app"
+  CIV5_DYLIB     path to a local libcivdisplay.dylib
+  CIV5_VERSION   release tag to download (default: latest)
+USAGE
+}
+
+list_displays() {
+  echo "Displays detected by macOS. Use the NAME (e.g. IPS225) in the config:"
+  echo
+  system_profiler SPDisplaysDataType 2>/dev/null \
+    | grep -E '^        [A-Za-z].*:$' \
+    | sed 's/^        /  - /; s/:$//' || true
+  echo
+  echo "Names are matched as a substring (case-insensitive)."
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --build)   BUILD=1; shift ;;
     --dylib)   LOCAL_DYLIB="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; exit 1 ;;
+    --list)    list_displays; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
 done
 
@@ -103,6 +121,24 @@ if ! file "$DYLIB" | grep -q "Mach-O"; then
   exit 1
 fi
 
+# --- monitor config --------------------------------------------------------
+if [ ! -f "$CONFIG" ]; then
+  echo "==> Writing default config: $CONFIG"
+  cat > "$CONFIG" <<'CONF'
+# Which monitor should Civilization V use?
+# Edit the value, then relaunch the game.
+#
+#   external   first non-built-in display            (default)
+#   builtin    the built-in display
+#   IPS225     first display whose name contains this text
+#   1          index from CGGetActiveDisplayList (0-based)
+#
+# List display names with:  install.sh --list
+#
+CIV5_DISPLAY=external
+CONF
+fi
+
 # --- install the wrapper ---------------------------------------------------
 echo "==> Installing wrapper"
 if [ ! -f "$GAME_REAL" ]; then
@@ -113,10 +149,11 @@ if [ -f "$SCRIPT_DIR/src/wrapper.sh" ]; then
 else
   cat > "$GAME_BIN" <<'WRAPPER'
 #!/bin/bash
-# Installed by Civ5Display. Adds the display interposer to DYLD_INSERT_LIBRARIES
-# (preserving any Steam overlay libraries already set) and runs the real game
-# binary. CIV5_DISPLAY chooses the monitor:
-#   external | builtin | IPS225 | 1
+# Installed by Civ5Display as "Contents/MacOS/Civilization V".
+# Target monitor is set in ~/Library/Application Support/Civ5Display/config
+# (CIV5_DISPLAY: external | builtin | a display name | a 0-based index).
+CONFIG="$HOME/Library/Application Support/Civ5Display/config"
+[ -f "$CONFIG" ] && . "$CONFIG"
 : "${CIV5_DISPLAY:=external}"
 export CIV5_DISPLAY
 EXTRA="__DYLIB_PATH__"
@@ -137,5 +174,7 @@ codesign --force --deep --sign - "$APP" >/dev/null
 
 echo
 echo "Done. Launch Civilization V from Steam."
-echo "Choose the monitor with CIV5_DISPLAY inside:"
-echo "  $GAME_BIN"
+echo
+echo "To choose the monitor, edit:"
+echo "  $CONFIG"
+echo "Run '$0 --list' to see display names."

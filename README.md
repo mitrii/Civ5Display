@@ -144,29 +144,79 @@ and stay there when you drag it or open the laptop lid.
 
 ---
 
-## Choosing the monitor
+## Choosing a different monitor
 
-The wrapper reads the environment variable `CIV5_DISPLAY`. Edit the line in
-`Contents/MacOS/Civilization V` (or export the variable before launching):
+By default the game uses the **first external (non-built-in) display**. If you
+have more than one external monitor and want a specific one, you set it in a
+small config file — you never need to touch the game files.
 
-| Value      | Meaning                                              |
-|------------|------------------------------------------------------|
-| `external` | first non-built-in display *(default)*               |
-| `builtin`  | the built-in display                                 |
-| `IPS225`   | first display whose product name contains this text  |
-| `1`        | index into `CGGetActiveDisplayList` (0-based)        |
+**Step 1 — find the monitor's name**
 
-For example, to always use a monitor named "DELL U2720Q":
+```sh
+./install.sh --list
+```
+
+or, without the installer:
+
+```sh
+system_profiler SPDisplaysDataType | grep -E '^        [A-Za-z].*:$'
+```
+
+You'll get something like this (the first one is usually the built-in display):
+
+```
+  - Color LCD
+  - IPS225
+  - DELL U2720Q
+```
+
+**Step 2 — put that name in the config file**
+
+The installer creates this file:
+
+```
+~/Library/Application Support/Civ5Display/config
+```
+
+Open it in a text editor:
+
+```sh
+open -e "$HOME/Library/Application Support/Civ5Display/config"
+```
+
+and change the `CIV5_DISPLAY` line. For example, to always use the
+"DELL U2720Q":
+
+```ini
+CIV5_DISPLAY=DELL U2720Q
+```
+
+Save the file.
+
+**Step 3 — relaunch Civilization V from Steam.** Done.
+
+### Allowed values for `CIV5_DISPLAY`
+
+| Value           | What it selects                                             |
+|-----------------|-------------------------------------------------------------|
+| `external`      | first non-built-in display *(default)*                      |
+| `builtin`       | the built-in display                                        |
+| `DELL U2720Q`   | first display whose name contains this text (case-insensitive) |
+| `1`             | index from `CGGetActiveDisplayList` (0-based)               |
+
+> The name is matched as a **substring**, so `IPS` also matches `IPS225`.
+> Prefer the name; the numeric index is rarely needed.
+
+### Alternative: set it inside the wrapper
+
+If you'd rather not use the config file, edit the same line directly in the
+wrapper `<App>/Contents/MacOS/Civilization V`:
 
 ```sh
 : "${CIV5_DISPLAY:=DELL U2720Q}"
 ```
 
-List your displays and their names with:
-
-```sh
-system_profiler SPDisplaysDataType | grep -E "Display Type|Resolution|^        [A-Za-z]"
-```
+An environment variable exported before launching works too.
 
 ## Caveats
 
